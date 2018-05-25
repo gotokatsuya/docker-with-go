@@ -1,4 +1,4 @@
-FROM docker:17.10-git
+FROM docker:18.03-git
 
 RUN apk add --update --no-cache make python py-pip py-setuptools bash openssl
 
@@ -6,11 +6,10 @@ RUN apk add --update --no-cache make python py-pip py-setuptools bash openssl
 RUN pip --no-cache-dir install awscli
 
 # GOLANG
-ENV GOLANG_VERSION 1.9.2
+ENV GOLANG_VERSION 1.10.2
 
-# https://golang.org/issue/14851 (Go 1.8 & 1.7)
-# https://golang.org/issue/17847 (Go 1.7)
-COPY *.patch /go-alpine-patches/
+# make-sure-R0-is-zero-before-main-on-ppc64le.patch: https://github.com/golang/go/commit/9aea0e89b6df032c29d0add8d69ba2c95f1106d9 (Go 1.9)
+#COPY *.patch /go-alpine-patches/
 
 RUN set -eux; \
 	apk add --no-cache --virtual .build-deps \
@@ -27,14 +26,19 @@ RUN set -eux; \
 # (for example, if our build host is GOARCH=amd64, but our build env/image is GOARCH=386, our build needs GOARCH=386)
 		GOOS="$(go env GOOS)" \
 		GOARCH="$(go env GOARCH)" \
-		GO386="$(go env GO386)" \
-		GOARM="$(go env GOARM)" \
 		GOHOSTOS="$(go env GOHOSTOS)" \
 		GOHOSTARCH="$(go env GOHOSTARCH)" \
 	; \
+# also explicitly set GO386 and GOARM if appropriate
+# https://github.com/docker-library/golang/issues/184
+	apkArch="$(apk --print-arch)"; \
+	case "$apkArch" in \
+		armhf) export GOARM='6' ;; \
+		x86) export GO386='387' ;; \
+	esac; \
 	\
 	wget -O go.tgz "https://golang.org/dl/go$GOLANG_VERSION.src.tar.gz"; \
-	echo '665f184bf8ac89986cfd5a4460736976f60b57df6b320ad71ad4cef53bb143dc *go.tgz' | sha256sum -c -; \
+	echo '6264609c6b9cd8ed8e02ca84605d727ce1898d74efa79841660b2e3e985a98bd *go.tgz' | sha256sum -c -; \
 	tar -C /usr/local -xzf go.tgz; \
 	rm go.tgz; \
 	\
@@ -56,7 +60,3 @@ ENV PATH $GOPATH/bin:/usr/local/go/bin:$PATH
 
 RUN mkdir -p "$GOPATH/src" "$GOPATH/bin" && chmod -R 777 "$GOPATH"
 WORKDIR $GOPATH
-
-COPY go-wrapper /usr/local/bin/
-
-RUN rm -rf /tmp/* /var/cache/apk/*
